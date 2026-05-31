@@ -2,28 +2,37 @@ import { useCallback, useEffect, useRef } from 'react'
 import { useConversationStore } from '../store/conversationStore'
 import type { ServerMessage, TranscriptEntry } from '../types/protocol'
 
-const WS_URL = `ws://localhost:8100/ws`
+const WS_BASE = `ws://localhost:8100/ws`
 
-export function useWebSocket(sessionId: string, onAudioChunk?: (data: ArrayBuffer) => void) {
+export function useWebSocket(
+  sessionId: string,
+  voiceId: string,
+  onAudioChunk?: (data: ArrayBuffer) => void,
+  onVoiceConfirmed?: (confirmedVoiceId: string) => void,
+) {
   const wsRef = useRef<WebSocket | null>(null)
   const store = useConversationStore()
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>()
   const onAudioChunkRef = useRef(onAudioChunk)
   onAudioChunkRef.current = onAudioChunk
+  const onVoiceConfirmedRef = useRef(onVoiceConfirmed)
+  onVoiceConfirmedRef.current = onVoiceConfirmed
+
+  // Keep latest voiceId accessible inside the stable connect closure
+  const voiceIdRef = useRef(voiceId)
+  voiceIdRef.current = voiceId
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return
 
-    const ws = new WebSocket(`${WS_URL}/${sessionId}`)
+    const url = `${WS_BASE}/${sessionId}?voice_id=${encodeURIComponent(voiceIdRef.current)}`
+    const ws = new WebSocket(url)
     wsRef.current = ws
+    ws.binaryType = 'arraybuffer'
 
     ws.onopen = () => store.setConnected(true)
 
-    // Tell the WebSocket to deliver binary frames as ArrayBuffer (not Blob)
-    ws.binaryType = 'arraybuffer'
-
     ws.onmessage = (event) => {
-      // Binary frame = TTS audio chunk from Pipecat
       if (event.data instanceof ArrayBuffer) {
         onAudioChunkRef.current?.(event.data)
         return
@@ -34,7 +43,14 @@ export function useWebSocket(sessionId: string, onAudioChunk?: (data: ArrayBuffe
 
         switch (msg.type) {
           case 'session_ready':
-            store.setSession(msg.session_id, msg.avatar, msg.available_avatars)
+            store.setSession(
+              msg.session_id,
+              msg.avatar,
+              msg.available_avatars,
+              msg.voice_id,
+            )
+            // Sync localStorage if the server corrected the voice (e.g. invalid ID fallback)
+            onVoiceConfirmedRef.current?.(msg.voice_id)
             break
 
           case 'avatar_state':
@@ -64,13 +80,20 @@ export function useWebSocket(sessionId: string, onAudioChunk?: (data: ArrayBuffe
           case 'avatar_changed':
             store.setAvatar(msg.avatar)
             break
+
+          case 'voice_change_ack':
+            if (msg.reconnect_required) {
+              // Close and reconnect — connect() will pick up the new voiceId from the ref
+              ws.close()
+            }
+            break
         }
       }
     }
 
     ws.onclose = () => {
       store.setConnected(false)
-      reconnectTimer.current = setTimeout(connect, 3000)
+      reconnectTimer.current = setTimeout(connect, 1000)
     }
 
     ws.onerror = () => ws.close()
@@ -96,5 +119,10 @@ export function useWebSocket(sessionId: string, onAudioChunk?: (data: ArrayBuffe
     }
   }, [])
 
-  return { sendBinary, sendText }
+  const reconnectWithVoice = useCallback((newVoiceId: string) => {
+    voiceIdRef.current = newVoiceId
+    wsRef.current?.close()
+  }, [])
+
+  return { sendBinary, sendText, reconnectWithVoice }
 }

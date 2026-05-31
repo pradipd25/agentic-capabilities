@@ -52,6 +52,18 @@ class TextInputProcessor(FrameProcessor):
                             pass
                     return  # consumed
 
+                if msg_type == "set_voice":
+                    voice_id = msg.get("voice_id", "")
+                    try:
+                        await self._ws.send_text(json.dumps({
+                            "type": "voice_change_ack",
+                            "voice_id": voice_id,
+                            "reconnect_required": True,
+                        }))
+                    except Exception:
+                        pass
+                    return  # consumed
+
             except Exception:
                 pass
 

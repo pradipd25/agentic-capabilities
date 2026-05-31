@@ -75,6 +75,10 @@ export function useAudioPlayer() {
     const source = ctx.createBufferSource()
     source.buffer = audioBuf
     source.connect(ctx.destination)
+    // If nextTimeRef is stale (>3s ahead of now, e.g. after a session reconnect), reset it
+    if (nextTimeRef.current > ctx.currentTime + 3) {
+      nextTimeRef.current = 0
+    }
     const startAt = Math.max(ctx.currentTime + 0.04, nextTimeRef.current)
     source.start(startAt)
     nextTimeRef.current = startAt + audioBuf.duration

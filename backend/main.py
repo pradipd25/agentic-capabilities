@@ -1,12 +1,12 @@
 import json
-import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import cast
 
 import structlog
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from mcp.server.sse import SseServerTransport
 
@@ -18,6 +18,7 @@ from backend.processors.avatar_state import AvatarStateProcessor
 from backend.processors.text_input import TextInputProcessor
 from backend.serializers import RawAudioSerializer
 from backend.session.manager import SessionManager
+from backend.voice_registry import PREVIEW_PHRASE, get_voices_for_provider, is_valid_openai_voice
 
 log = structlog.get_logger()
 
@@ -28,7 +29,8 @@ _PROJECT_ROOT = Path(__file__).parent.parent
 _session_manager = SessionManager()
 _avatar_registry = AvatarRegistry(_PROJECT_ROOT / "avatars" / "manifest.json")
 _websockets: dict[str, WebSocket] = {}   # session_id → active WebSocket
-_contexts: dict = {}                      # session_id → OpenAILLMContext
+_contexts: dict = {}                      # session_id → LLMContext
+_voice_preview_cache: dict[str, bytes] = {}  # voice_id → WAV bytes (generated once)
 
 
 @asynccontextmanager
@@ -78,12 +80,87 @@ async def get_sessions():
     return {"sessions": _session_manager.list_sessions()}
 
 
+def _is_elevenlabs_active() -> bool:
+    return bool(settings.elevenlabs_api_key and settings.elevenlabs_api_key.strip() not in ("", "..."))
+
+
+@app.get("/api/voices")
+async def get_voices():
+    if _is_elevenlabs_active():
+        # Fetch real voices from ElevenLabs API
+        try:
+            import httpx
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    "https://api.elevenlabs.io/v1/voices",
+                    headers={"xi-api-key": settings.elevenlabs_api_key},
+                    timeout=8,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                voices = [
+                    {
+                        "id": v["voice_id"],
+                        "name": v["name"],
+                        "description": v.get("description") or v.get("labels", {}).get("description", ""),
+                        "gender": v.get("labels", {}).get("gender", "neutral"),
+                    }
+                    for v in data.get("voices", [])
+                ]
+                return {"voices": voices, "provider": "elevenlabs"}
+        except Exception as e:
+            log.warning("elevenlabs.voices_fetch_failed", error=str(e))
+            # Fall through to OpenAI list as fallback
+    voices = get_voices_for_provider("openai")
+    return {"voices": voices, "provider": "openai"}
+
+
+@app.get("/api/voices/{voice_id}/preview")
+async def get_voice_preview(voice_id: str):
+    if voice_id in _voice_preview_cache:
+        return Response(content=_voice_preview_cache[voice_id], media_type="audio/wav")
+
+    try:
+        if _is_elevenlabs_active():
+            import httpx
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
+                    headers={"xi-api-key": settings.elevenlabs_api_key, "Content-Type": "application/json"},
+                    json={"text": PREVIEW_PHRASE, "model_id": "eleven_monolingual_v1"},
+                    timeout=15,
+                )
+                resp.raise_for_status()
+                audio_bytes = resp.content
+        else:
+            if not is_valid_openai_voice(voice_id):
+                return JSONResponse(status_code=404, content={"error": f"Unknown voice: {voice_id}"})
+            from openai import AsyncOpenAI
+            client = AsyncOpenAI(api_key=settings.openai_api_key)
+            response = await client.audio.speech.create(
+                model="tts-1",
+                voice=voice_id,  # type: ignore[arg-type]
+                input=PREVIEW_PHRASE,
+                response_format="wav",
+            )
+            audio_bytes = response.content
+
+        _voice_preview_cache[voice_id] = audio_bytes
+        return Response(content=audio_bytes, media_type="audio/wav")
+    except Exception as e:
+        log.error("voice_preview.error", voice_id=voice_id, error=str(e))
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 # ── WebSocket conversation endpoint ───────────────────────────────────────────
 
 @app.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
     await websocket.accept()
     _websockets[session_id] = websocket
+
+    # Read optional voice_id query param for VocalPalette selection
+    selected_voice_id: str | None = websocket.query_params.get("voice_id")
 
     # Resolve session info — may have been pre-created via MCP avatar.create_session
     info = _session_manager.get(session_id)
@@ -99,7 +176,16 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
     avatar = _avatar_registry.get_avatar(info.avatar_id) or _avatar_registry.list_avatars()[0]
 
-    log.info("session.connected", session_id=session_id, avatar=avatar.id)
+    # Voice precedence: query param > avatar default
+    # ElevenLabs IDs are ~20-char alphanumeric strings; short names like "ash"/"nova"
+    # are OpenAI voice names and must be rejected when ElevenLabs is active.
+    if selected_voice_id and _is_elevenlabs_active() and len(selected_voice_id) < 15:
+        log.warning("session.invalid_voice_for_elevenlabs", voice_id=selected_voice_id)
+        selected_voice_id = None  # fall back to avatar's default ElevenLabs voice
+
+    active_voice_id = selected_voice_id or avatar.voice_id or "nova"
+
+    log.info("session.connected", session_id=session_id, avatar=avatar.id, voice=active_voice_id)
 
     try:
         from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -124,6 +210,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             "session_id": session_id,
             "avatar": avatar.model_dump(),
             "available_avatars": [a.model_dump() for a in _avatar_registry.list_avatars()],
+            "voice_id": active_voice_id,
         }))
 
         transport = FastAPIWebsocketTransport(
@@ -149,18 +236,18 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         assistant_aggregator = LLMAssistantAggregator(context)
         text_input_processor = TextInputProcessor(context, websocket, _avatar_registry)
 
-        # TTS — ElevenLabs if key present, else OpenAI TTS fallback
+        # TTS — ElevenLabs if key present, else OpenAI TTS (uses VocalPalette voice)
         if settings.elevenlabs_api_key and settings.elevenlabs_api_key != "...":
             from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
             tts = ElevenLabsTTSService(
                 api_key=settings.elevenlabs_api_key,
-                voice_id=avatar.voice_id,
+                voice_id=active_voice_id,
             )
         else:
             from pipecat.services.openai.tts import OpenAITTSService
             tts = OpenAITTSService(
                 api_key=settings.openai_api_key,
-                voice="nova",
+                voice=active_voice_id,  # type: ignore[arg-type]
             )
 
         # STT — Whisper (local, no API key needed)

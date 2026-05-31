@@ -16,11 +16,18 @@ export interface AvatarMeta {
   style: string
 }
 
+export interface VoiceMeta {
+  id: string
+  name: string
+  description: string
+  gender: 'male' | 'female' | 'neutral'
+}
+
 export type AnimationName = 'idle' | 'listening' | 'thinking' | 'talking' | 'greeting'
 
 // Server → Client messages
 export type ServerMessage =
-  | { type: 'session_ready'; session_id: string; avatar: AvatarMeta; available_avatars: AvatarMeta[] }
+  | { type: 'session_ready'; session_id: string; avatar: AvatarMeta; available_avatars: AvatarMeta[]; voice_id: string }
   | { type: 'avatar_state'; animation: AnimationName; speaking: boolean; audio_level?: number }
   | { type: 'transcript_final'; text: string; speaker: 'user' | 'assistant' }
   | { type: 'llm_token'; token: string }
@@ -28,6 +35,7 @@ export type ServerMessage =
   | { type: 'tts_start'; turn_id?: string }
   | { type: 'tts_done'; turn_id?: string; duration_ms?: number }
   | { type: 'avatar_changed'; avatar: AvatarMeta }
+  | { type: 'voice_change_ack'; voice_id: string; reconnect_required: boolean }
   | { type: 'error'; message: string; code?: string }
 
 // Transcript entry for display

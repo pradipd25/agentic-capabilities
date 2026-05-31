@@ -1,10 +1,12 @@
-import { useCallback } from 'react'
+import { useCallback, useState } from 'react'
 import { AvatarScene } from './components/AvatarScene/AvatarScene'
 import { AvatarSelector } from './components/AvatarSelector/AvatarSelector'
 import { ChatPanel } from './components/ChatPanel/ChatPanel'
+import { VocalPalette } from './components/VocalPalette/VocalPalette'
 import { VoiceControls } from './components/VoiceControls/VoiceControls'
 import { useAudioCapture } from './hooks/useAudioCapture'
 import { useAudioPlayer } from './hooks/useAudioPlayer'
+import { useVoicePreferences } from './hooks/useVoicePreferences'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useConversationStore } from './store/conversationStore'
 import type { AvatarMeta } from './types/protocol'
@@ -13,9 +15,12 @@ const params = new URLSearchParams(window.location.search)
 const SESSION_ID = params.get('session') ?? crypto.randomUUID().slice(0, 8)
 
 function App() {
+  const { voiceId, saveVoice } = useVoicePreferences()
   const { playChunk, initAudio, audioReady, lastError, chunksPlayed } = useAudioPlayer()
-  const { sendBinary, sendText } = useWebSocket(SESSION_ID, playChunk)
+  const { sendBinary, sendText, reconnectWithVoice } = useWebSocket(SESSION_ID, voiceId, playChunk, saveVoice)
   const { isConnected, avatar } = useConversationStore()
+
+  const [showPalette, setShowPalette] = useState(false)
 
   const handleChunk = useCallback((data: ArrayBuffer) => {
     sendBinary(data)
@@ -39,6 +44,12 @@ function App() {
 
   const handleSelectAvatar = (a: AvatarMeta) => {
     sendText({ type: 'set_avatar', avatar_id: a.id, session_id: SESSION_ID })
+  }
+
+  const handleApplyVoice = (newVoiceId: string) => {
+    initAudio()           // ensure shared AudioContext is unlocked from this click
+    saveVoice(newVoiceId)
+    reconnectWithVoice(newVoiceId)
   }
 
   return (
@@ -96,16 +107,44 @@ function App() {
 
         {/* Right — Chat */}
         <div className="flex flex-col w-1/2 min-h-0">
-          <div className="p-4 border-b border-border">
-            <h1 className="text-sm font-semibold text-gray-300">Conversation</h1>
-            <p className="text-xs text-gray-500">Session: {SESSION_ID}</p>
+          {/* Header with settings icon */}
+          <div className="p-4 border-b border-border flex items-center justify-between">
+            <div>
+              <h1 className="text-sm font-semibold text-gray-300">Conversation</h1>
+              <p className="text-xs text-gray-500">Session: {SESSION_ID}</p>
+            </div>
+            <button
+              onClick={() => setShowPalette(true)}
+              className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-panel border border-transparent hover:border-border transition-all"
+              title="VocalPalette — choose voice texture"
+            >
+              <SettingsIcon />
+            </button>
           </div>
           <div className="flex-1 min-h-0">
             <ChatPanel onSendText={handleSendText} />
           </div>
         </div>
       </div>
+
+      {/* VocalPalette drawer */}
+      {showPalette && (
+        <VocalPalette
+          onClose={() => setShowPalette(false)}
+          onApply={handleApplyVoice}
+          onInitAudio={initAudio}
+        />
+      )}
     </div>
+  )
+}
+
+function SettingsIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
   )
 }
 

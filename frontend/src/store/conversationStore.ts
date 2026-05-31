@@ -12,8 +12,9 @@ interface ConversationState {
   transcript: TranscriptEntry[]
   currentToken: string
   isConnected: boolean
+  voiceId: string
 
-  setSession: (id: string, avatar: AvatarMeta, avatars: AvatarMeta[]) => void
+  setSession: (id: string, avatar: AvatarMeta, avatars: AvatarMeta[], voiceId: string) => void
   setAvatar: (avatar: AvatarMeta) => void
   setAnimation: (animation: AnimationName, speaking: boolean) => void
   setAudioLevel: (level: number) => void
@@ -21,6 +22,7 @@ interface ConversationState {
   appendToken: (token: string) => void
   finalizeToken: () => void
   setConnected: (v: boolean) => void
+  setVoiceId: (id: string) => void
 }
 
 export const useConversationStore = create<ConversationState>((set) => ({
@@ -34,9 +36,10 @@ export const useConversationStore = create<ConversationState>((set) => ({
   transcript: [],
   currentToken: '',
   isConnected: false,
+  voiceId: 'nova',
 
-  setSession: (id, avatar, avatars) =>
-    set({ sessionId: id, avatar, availableAvatars: avatars, isConnected: true }),
+  setSession: (id, avatar, avatars, voiceId) =>
+    set({ sessionId: id, avatar, availableAvatars: avatars, isConnected: true, voiceId }),
 
   setAvatar: (avatar) => set({ avatar }),
 
@@ -54,4 +57,6 @@ export const useConversationStore = create<ConversationState>((set) => ({
   finalizeToken: () => set({ currentToken: '' }),
 
   setConnected: (v) => set({ isConnected: v }),
+
+  setVoiceId: (id) => set({ voiceId: id }),
 }))
