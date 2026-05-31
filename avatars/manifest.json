@@ -1,0 +1,34 @@
+{
+  "avatars": [
+    {
+      "id": "aria",
+      "name": "Aria",
+      "description": "A professional and friendly assistant",
+      "thumbnail_url": "/static/avatars/aria/thumbnail.png",
+      "model_url": "/static/avatars/aria/avatar.glb",
+      "animations": {
+        "idle": "/static/avatars/aria/avatar.glb",
+        "talking": "/static/avatars/aria/avatar.glb",
+        "thinking": "/static/avatars/aria/avatar.glb",
+        "greeting": "/static/avatars/aria/avatar.glb"
+      },
+      "voice_id": "EXAVITQu4vr4xnSDxMaL",
+      "style": "3d"
+    },
+    {
+      "id": "nova",
+      "name": "Nova",
+      "description": "A creative and energetic assistant",
+      "thumbnail_url": "/static/avatars/nova/thumbnail.png",
+      "model_url": "/static/avatars/nova/avatar.glb",
+      "animations": {
+        "idle": "/static/avatars/nova/avatar.glb",
+        "talking": "/static/avatars/nova/avatar.glb",
+        "thinking": "/static/avatars/nova/avatar.glb",
+        "greeting": "/static/avatars/nova/avatar.glb"
+      },
+      "voice_id": "21m00Tcm4TlvDq8ikWAM",
+      "style": "3d"
+    }
+  ]
+}
