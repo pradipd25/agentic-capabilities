@@ -31,7 +31,10 @@ Track implemented features and planned work.
 - [x] Mid-session avatar swap without disconnecting
 - [x] Extendable avatar registry via `avatars/manifest.json`
 - [ ] Lip-sync — drive mouth animation from live TTS audio level
-- [ ] Custom Ready Player Me avatar import via URL
+- [ ] Ready Player Me (RPM) — paste any `models.readyplayer.me/*.glb` URL to load a personalised avatar instantly
+- [ ] RPM iframe creator — embedded avatar builder so users can create/customise an RPM avatar without leaving the app
+- [ ] RPM animation pack — shared idle/talking/thinking/greeting clips that work across all RPM avatars (no per-model animation setup)
+- [ ] RPM avatar as default — set `RPM_AVATAR_URL=` in `.env` to use a personal RPM avatar as the startup avatar
 - [ ] Avatar emotion expressions (happy, surprised, thinking)
 - [ ] Multiple camera angles / zoom controls
 
@@ -124,4 +127,4 @@ Track implemented features and planned work.
 
 ---
 
-*Last updated: 2026-05-31*
+*Last updated: 2026-06-02*
