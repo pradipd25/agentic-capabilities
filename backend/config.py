@@ -28,11 +28,15 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     ollama_base_url: str = "http://localhost:11434"
 
-    # TTS
-    elevenlabs_api_key: str = ""
-
     # Conversation
     system_prompt: str = "You are a friendly and helpful AI assistant. Keep responses concise and conversational."
+    tts_speed: float = 1.25  # 0.25–4.0; 1.0 = normal OpenAI pace, 1.25 = natural conversation speed
+
+    # Base instruction always prepended to system_prompt — not user-overridable
+    _BASE_INSTRUCTION: str = (
+        "Always reply in the same language the user writes or speaks in. "
+        "If the user's message contains a mix of languages, reply in English."
+    )
     default_avatar: str = "aria"
 
 

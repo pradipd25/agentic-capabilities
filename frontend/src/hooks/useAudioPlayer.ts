@@ -44,6 +44,7 @@ function decodePCM(ctx: AudioContext, data: ArrayBuffer): AudioBuffer | null {
 export function useAudioPlayer() {
   const ctxRef      = useRef<AudioContext | null>(null)
   const nextTimeRef = useRef(0)
+  const sourcesRef  = useRef<Set<AudioBufferSourceNode>>(new Set())
   const [audioReady, setAudioReady] = useState(false)
   const [lastError, setLastError] = useState<string | null>(null)
   const [chunksPlayed, setChunksPlayed] = useState(0)
@@ -75,6 +76,9 @@ export function useAudioPlayer() {
     const source = ctx.createBufferSource()
     source.buffer = audioBuf
     source.connect(ctx.destination)
+    // Track the source so a barge-in can stop all pending playback immediately.
+    sourcesRef.current.add(source)
+    source.onended = () => { sourcesRef.current.delete(source) }
     // If nextTimeRef is stale (>3s ahead of now, e.g. after a session reconnect), reset it
     if (nextTimeRef.current > ctx.currentTime + 3) {
       nextTimeRef.current = 0
@@ -82,6 +86,18 @@ export function useAudioPlayer() {
     const startAt = Math.max(ctx.currentTime + 0.04, nextTimeRef.current)
     source.start(startAt)
     nextTimeRef.current = startAt + audioBuf.duration
+  }, [])
+
+  /**
+   * Immediately stop all scheduled/playing TTS audio and reset the playback
+   * clock. Called when the user barges in so the avatar goes silent at once
+   * instead of draining the audio already buffered ahead of real time.
+   */
+  const flush = useCallback(() => {
+    const ctx = ctxRef.current
+    sourcesRef.current.forEach((s) => { try { s.stop() } catch { /* already stopped */ } })
+    sourcesRef.current.clear()
+    nextTimeRef.current = ctx ? ctx.currentTime : 0
   }, [])
 
   const playChunk = useCallback(async (data: ArrayBuffer) => {
@@ -133,5 +149,19 @@ export function useAudioPlayer() {
     setChunksPlayed(0)
   }, [])
 
-  return { playChunk, initAudio, stop, audioReady, lastError, chunksPlayed }
+  /**
+   * True while TTS audio is actively scheduled to play, derived from the audio
+   * clock (`nextTimeRef` is the timeline position the last buffer plays until).
+   * Used to gate the mic so the avatar's own voice coming out of the speakers
+   * can't trigger the server VAD and cut a long response short. It releases
+   * automatically the instant playback drains — unlike the old
+   * `animation === 'talking'` flag, it can never get stuck "on".
+   */
+  const isBotAudioPlaying = useCallback(() => {
+    const ctx = ctxRef.current
+    if (!ctx || ctx.state !== 'running') return false
+    return nextTimeRef.current > ctx.currentTime
+  }, [])
+
+  return { playChunk, initAudio, stop, flush, audioReady, lastError, chunksPlayed, isBotAudioPlaying }
 }

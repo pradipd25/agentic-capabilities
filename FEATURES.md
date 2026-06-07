@@ -16,7 +16,7 @@ Track implemented features and planned work.
 - [x] Barge-in / interrupt — speak while avatar is talking, it stops and responds
 - [x] Multi-turn conversation history maintained across the session
 - [x] Streaming LLM token display — response appears word-by-word in chat panel
-- [x] Text-to-speech (ElevenLabs preferred, OpenAI TTS fallback)
+- [x] Text-to-speech (OpenAI TTS)
 - [ ] Streaming STT — real-time transcription as user speaks (Deepgram / AssemblyAI)
 - [ ] Noise cancellation / echo suppression on mic input
 - [ ] Push-to-talk mode (hold button vs toggle)
@@ -45,14 +45,10 @@ Track implemented features and planned work.
 - [x] ⚙ Settings drawer — VocalPalette UI accessible from chat header
 - [x] Browse voice cards with name, gender icon, and description
 - [x] Live voice preview — hear sample clip before applying
-- [x] ElevenLabs voices — full account library shown when API key is set
 - [x] OpenAI TTS voices — all 9 voices (Alloy, Ash, Coral, Echo, Fable, Nova, Onyx, Sage, Shimmer)
 - [x] Persistent selection — chosen voice saved in browser localStorage
 - [x] Safe fallback — invalid stored voice auto-corrected on session start
-- [ ] ElevenLabs Voice Cloning — clone any voice from a short recording
-- [ ] ElevenLabs Voice Design — generate a new voice from a text description
-- [ ] Voice parameter tuning — stability, similarity, style sliders (ElevenLabs)
-- [ ] Custom ElevenLabs voice ID entry — paste any voice ID from your account
+- [ ] Voice speed control in the UI — adjust TTS pace from the drawer
 
 ---
 

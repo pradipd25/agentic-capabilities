@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { AvatarScene } from './components/AvatarScene/AvatarScene'
 import { AvatarSelector } from './components/AvatarSelector/AvatarSelector'
 import { ChatPanel } from './components/ChatPanel/ChatPanel'
@@ -14,17 +14,97 @@ import type { AvatarMeta } from './types/protocol'
 const params = new URLSearchParams(window.location.search)
 const SESSION_ID = params.get('session') ?? crypto.randomUUID().slice(0, 8)
 
+// Barge-in tuning. While the avatar is speaking the mic is energy-gated so its
+// own echo (low level, after AEC) doesn't trigger the server VAD, but real
+// speech (loud, close to the mic) passes through and interrupts it.
+//
+// Robust gate: a barge-in is only declared after BARGE_IN_MIN_CHUNKS *consecutive*
+// chunks exceed BARGE_IN_RMS. Speaker echo is bursty (loud consonants separated
+// by gaps), so any single quiet chunk resets the streak — transient echo never
+// sustains. Real speech (loud, close, continuous) does. Until the streak is
+// confirmed the chunks are buffered, then replayed to the server so the onset of
+// the utterance isn't lost. Once confirmed, BARGE_IN_HOLD_MS keeps the mic open
+// (refreshed while speech continues) so the whole utterance streams smoothly.
+//
+// Tuning: lower BARGE_IN_RMS / BARGE_IN_MIN_CHUNKS if you must speak too loudly
+// or too long to interrupt; raise them if echo still cuts the avatar off.
+const BARGE_IN_RMS = 0.08          // loudness threshold (0–1), above the post-AEC echo floor
+const BARGE_IN_MIN_CHUNKS = 3      // consecutive loud 64 ms chunks (~256 ms) to confirm real speech
+const BARGE_IN_HOLD_MS = 800       // keep mic open this long after the last loud chunk
+
+function rmsFromInt16(buf: ArrayBuffer): number {
+  const samples = new Int16Array(buf)
+  if (samples.length === 0) return 0
+  let sum = 0
+  for (let i = 0; i < samples.length; i++) {
+    const v = samples[i] / 32768
+    sum += v * v
+  }
+  return Math.sqrt(sum / samples.length)
+}
+
 function App() {
   const { voiceId, saveVoice } = useVoicePreferences()
-  const { playChunk, initAudio, audioReady, lastError, chunksPlayed } = useAudioPlayer()
+  const { playChunk, initAudio, flush, audioReady, lastError, chunksPlayed, isBotAudioPlaying } = useAudioPlayer()
   const { sendBinary, sendText, reconnectWithVoice } = useWebSocket(SESSION_ID, voiceId, playChunk, saveVoice)
   const { isConnected, avatar } = useConversationStore()
 
   const [showPalette, setShowPalette] = useState(false)
 
+  // Timestamp (performance.now) until which the mic stays open after detecting
+  // barge-in speech, so an utterance streams continuously through brief pauses.
+  const bargeInUntilRef = useRef(0)
+  // Count of consecutive loud chunks while building toward a confirmed barge-in.
+  const loudStreakRef = useRef(0)
+  // Onset chunks captured during the streak, replayed once barge-in is confirmed
+  // so the start of the utterance reaches the server STT.
+  const onsetRef = useRef<ArrayBuffer[]>([])
+
+  // Mic routing:
+  //  - When the avatar is silent, send everything (normal listening).
+  //  - While the avatar is speaking, only forward audio that is *sustained* real
+  //    speech. The avatar's own echo (low level after AEC, and bursty) can't
+  //    sustain a loud streak, so it never falsely interrupts a long response;
+  //    but when the user actually talks over the avatar the streak confirms, the
+  //    avatar is silenced immediately, and the audio (onset included) is streamed
+  //    to the server VAD — giving robust voice barge-in.
   const handleChunk = useCallback((data: ArrayBuffer) => {
-    sendBinary(data)
-  }, [sendBinary])
+    if (!isBotAudioPlaying()) {
+      // Normal listening between turns — reset any half-built barge-in state.
+      loudStreakRef.current = 0
+      onsetRef.current = []
+      sendBinary(data)
+      return
+    }
+
+    const now = performance.now()
+    const loud = rmsFromInt16(data) > BARGE_IN_RMS
+
+    // Already in a confirmed barge-in window: keep streaming, and extend the
+    // hold while the user is still speaking so words don't get chopped.
+    if (now < bargeInUntilRef.current) {
+      if (loud) bargeInUntilRef.current = now + BARGE_IN_HOLD_MS
+      sendBinary(data)
+      return
+    }
+
+    if (!loud) {
+      // A quiet chunk breaks the streak — transient echo, not sustained speech.
+      loudStreakRef.current = 0
+      onsetRef.current = []
+      return
+    }
+
+    // Building a streak of consecutive loud chunks; buffer the onset audio.
+    loudStreakRef.current += 1
+    onsetRef.current.push(data)
+    if (loudStreakRef.current >= BARGE_IN_MIN_CHUNKS) {
+      flush()                                       // silence the avatar at once
+      onsetRef.current.forEach((c) => sendBinary(c)) // replay the captured onset
+      onsetRef.current = []
+      bargeInUntilRef.current = now + BARGE_IN_HOLD_MS
+    }
+  }, [sendBinary, isBotAudioPlaying, flush])
 
   const { isCapturing, start, stop } = useAudioCapture(handleChunk)
 

@@ -12,7 +12,7 @@
         "thinking": "/static/avatars/aria/avatar.glb",
         "greeting": "/static/avatars/aria/avatar.glb"
       },
-      "voice_id": "EXAVITQu4vr4xnSDxMaL",
+      "voice_id": "coral",
       "style": "3d"
     },
     {
@@ -27,7 +27,7 @@
         "thinking": "/static/avatars/nova/avatar.glb",
         "greeting": "/static/avatars/nova/avatar.glb"
       },
-      "voice_id": "21m00Tcm4TlvDq8ikWAM",
+      "voice_id": "nova",
       "style": "3d"
     }
   ]

@@ -10,15 +10,30 @@ export function useAudioCapture(onChunk: (data: ArrayBuffer) => void) {
 
   const start = useCallback(async () => {
     if (isCapturing) return
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+    // Enable the browser's built-in acoustic echo cancellation so the avatar's
+    // TTS coming out of the speakers is removed from the mic input. This is what
+    // lets the mic stay open while the avatar talks (for voice barge-in /
+    // language switching) without the bot's own voice triggering the VAD.
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+      video: false,
+    })
     streamRef.current = stream
 
     const ctx = new AudioContext({ sampleRate: SAMPLE_RATE })
     contextRef.current = ctx
 
     const source = ctx.createMediaStreamSource(stream)
-    // ScriptProcessorNode works everywhere without a separate worklet file
-    const processor = ctx.createScriptProcessor(4096, 1, 1)
+    // ScriptProcessorNode works everywhere without a separate worklet file.
+    // 1024 samples @ 16 kHz = 64 ms/chunk. Finer than the old 4096 (256 ms) so
+    // the barge-in energy gate can require several *consecutive* loud chunks of
+    // real speech before interrupting, instead of tripping on a single loud TTS
+    // syllable's echo averaged over a long window.
+    const processor = ctx.createScriptProcessor(1024, 1, 1)
     processorRef.current = processor
 
     processor.onaudioprocess = (e) => {

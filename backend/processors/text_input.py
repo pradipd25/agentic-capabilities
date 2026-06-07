@@ -4,6 +4,7 @@ from fastapi import WebSocket
 from pipecat.frames.frames import (
     Frame,
     InputTransportMessageFrame,
+    InterruptionFrame,
     LLMContextFrame,
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -35,6 +36,27 @@ class TextInputProcessor(FrameProcessor):
                 if msg_type == "text_input":
                     text = msg.get("text", "").strip()
                     if text:
+                        # Barge-in handling for a text follow-up that arrives while
+                        # the avatar is still mid-response (LLM streaming / TTS
+                        # speaking):
+                        #
+                        # Push an InterruptionFrame DOWNSTREAM first. Because it
+                        # travels the same direction as the LLMContextFrame we push
+                        # right after, the two stay FIFO-ordered: the interruption
+                        # reaches the LLM first (cancelling the in-flight completion,
+                        # flushing TTS, and making the assistant aggregator commit
+                        # whatever was spoken so far), then our context frame triggers
+                        # a fresh completion. Routing the interruption upstream
+                        # instead (InterruptionTaskFrame) makes the task re-inject it
+                        # at the pipeline source, where it can overtake and cancel the
+                        # brand-new generation — wedging the pipeline.
+                        #
+                        # The interrupted partial response is committed AFTER this new
+                        # user turn, leaving the context ending in a stale assistant
+                        # message. ContextSanitizerProcessor (just before the LLM)
+                        # drops that trailing assistant message so the model answers
+                        # the follow-up instead of continuing the abandoned reply.
+                        await self.push_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
                         self._context.add_message({"role": "user", "content": text})
                         await self.push_frame(LLMContextFrame(context=self._context))
                     return  # consumed

@@ -22,7 +22,6 @@ PREVIEW_PHRASE = "Hello! I'm your AI assistant. How can I help you today?"
 def get_voices_for_provider(provider: str) -> list[dict]:
     if provider == "openai":
         return OPENAI_VOICES
-    # ElevenLabs: voices come from the avatar manifest (voice_id per avatar)
     return []
 
 

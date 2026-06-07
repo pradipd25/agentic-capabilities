@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Plug-and-play avatar conversation capability for AI agents"
 requires-python = ">=3.11"
 dependencies = [
-    "pipecat-ai[anthropic,openai,google,elevenlabs,silero]>=0.0.55",
+    "pipecat-ai[anthropic,openai,google,silero]>=0.0.55",
     "faster-whisper>=1.0",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",

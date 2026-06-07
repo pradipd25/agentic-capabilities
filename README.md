@@ -30,18 +30,16 @@ A plug-and-play video/avatar conversation capability for AI agents. Built on [Pi
 
 | Feature | Details |
 |---|---|
-| **Voice picker** | ⚙ settings icon opens the VocalPalette drawer — choose from your full ElevenLabs voice library or all 9 OpenAI TTS voices |
+| **Voice picker** | ⚙ settings icon opens the VocalPalette drawer — choose from all 9 OpenAI TTS voices |
 | **Live preview** | Click ▶ on any voice card to hear a sample clip before applying |
-| **Provider-aware** | Automatically shows ElevenLabs voices when an ElevenLabs API key is set, OpenAI voices otherwise |
 | **Persistent selection** | Chosen voice saved in browser `localStorage` — remembered across page reloads |
-| **Safe fallback** | If a stored voice ID becomes invalid (e.g. switching TTS providers), the backend automatically falls back to the avatar's default voice and corrects `localStorage` |
+| **Safe fallback** | If a stored voice ID becomes invalid, the backend automatically falls back to the avatar's default voice and corrects `localStorage` |
 
 ### Text-to-Speech
 
 | Feature | Details |
 |---|---|
-| **ElevenLabs** (preferred) | High-quality, realistic voices; uses your ElevenLabs account's voice library |
-| **OpenAI TTS** (fallback) | 9 built-in voices (Alloy, Ash, Coral, Echo, Fable, Nova, Onyx, Sage, Shimmer) — used when no ElevenLabs key is set |
+| **OpenAI TTS** | 9 built-in voices (Alloy, Ash, Coral, Echo, Fable, Nova, Onyx, Sage, Shimmer) via the `tts-1` model |
 
 ### LLM
 
@@ -133,8 +131,7 @@ Override the model: `LLM_MODEL=claude-opus-4-8`
 4. Click a voice to select it, then **Apply Voice**
 5. The session reconnects with the new voice — your selection is saved for next time
 
-> With an `ELEVENLABS_API_KEY` set, VocalPalette shows your full ElevenLabs voice library.
-> Without it, the 9 built-in OpenAI TTS voices are shown.
+> VocalPalette offers the 9 built-in OpenAI TTS voices.
 
 ---
 
@@ -203,10 +200,9 @@ LLM_MODEL=                     # optional model override
 
 # API Keys
 ANTHROPIC_API_KEY=
-OPENAI_API_KEY=
+OPENAI_API_KEY=               # always required — powers TTS regardless of LLM_PROVIDER
 GOOGLE_API_KEY=
 GROQ_API_KEY=
-ELEVENLABS_API_KEY=            # if set, ElevenLabs is used for TTS
 
 # Optional
 SYSTEM_PROMPT=                 # custom assistant persona
