@@ -1,0 +1,12 @@
+{
+  "name": "@agent-face/sdk",
+  "version": "0.1.0",
+  "description": "TypeScript client SDK for the Agent Face Presence Protocol",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "license": "SEE LICENSE IN ../../README.md"
+}

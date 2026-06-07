@@ -58,7 +58,9 @@ export function useWebSocket(
             if (msg.audio_level !== undefined) store.setAudioLevel(msg.audio_level)
             break
 
-          case 'transcript_final': {
+          // finalized conversational line (v0 + v0.1 names)
+          case 'transcript_final':
+          case 'transcript': {
             const entry: TranscriptEntry = {
               id: crypto.randomUUID(),
               speaker: msg.speaker,
@@ -69,19 +71,56 @@ export function useWebSocket(
             break
           }
 
+          // streamed conversational text (v0 llm_token / v0.1 speak_delta)
           case 'llm_token':
             store.appendToken(msg.token)
             break
 
+          case 'speak_delta':
+            store.appendToken(msg.text)
+            break
+
+          // end of turn (v0 llm_done / v0.1 done)
           case 'llm_done':
+          case 'done':
             store.finalizeToken()
+            break
+
+          // agent activity — shown, never spoken
+          case 'think':
+            store.setAnimation('thinking', false)
+            if (msg.text) store.setStatus(msg.text)
+            break
+
+          case 'action':
+            store.upsertAction({
+              id: msg.id ?? crypto.randomUUID(),
+              name: msg.name,
+              detail: msg.detail,
+              status: msg.status ?? 'start',
+            })
+            break
+
+          case 'ask':
+            store.setAsk({
+              id: msg.id,
+              question: msg.question,
+              kind: msg.kind ?? 'clarify',
+              options: msg.options,
+            })
+            break
+
+          case 'status':
+            store.setStatus(msg.text ?? '')
             break
 
           case 'avatar_changed':
             store.setAvatar(msg.avatar)
             break
 
+          // voice swap (v0 voice_change_ack / v0.1 voice_changed)
           case 'voice_change_ack':
+          case 'voice_changed':
             if (msg.reconnect_required) {
               // Close and reconnect — connect() will pick up the new voiceId from the ref
               ws.close()

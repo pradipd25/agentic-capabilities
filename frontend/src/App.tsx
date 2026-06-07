@@ -119,7 +119,13 @@ function App() {
 
   const handleSendText = (text: string) => {
     initAudio()
+    useConversationStore.getState().clearTurn()
     sendText({ type: 'text_input', text, session_id: SESSION_ID })
+  }
+
+  const handleAnswerAsk = (id: string, value: string) => {
+    useConversationStore.getState().clearAsk()
+    sendText({ type: 'ask_response', id, value, session_id: SESSION_ID })
   }
 
   const handleSelectAvatar = (a: AvatarMeta) => {
@@ -202,7 +208,7 @@ function App() {
             </button>
           </div>
           <div className="flex-1 min-h-0">
-            <ChatPanel onSendText={handleSendText} />
+            <ChatPanel onSendText={handleSendText} onAnswerAsk={handleAnswerAsk} />
           </div>
         </div>
       </div>

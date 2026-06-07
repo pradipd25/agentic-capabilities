@@ -108,6 +108,70 @@ async def list_tools() -> list[types.Tool]:
                 "required": ["session_id", "context"],
             },
         ),
+        # ── Presence Protocol surface — drive the face directly from any agent ──
+        types.Tool(
+            name="avatar.show_action",
+            description=(
+                "Show a tool/step the agent is performing as an action chip on the "
+                "avatar (e.g. Read/Edit/Bash). Shown visually, never spoken. Use "
+                "status='start' when beginning and 'success'/'error' to update it."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "name": {"type": "string", "description": "Action/tool name, e.g. Read"},
+                    "detail": {"type": "string", "description": "One-line detail, e.g. a file path"},
+                    "status": {"type": "string", "enum": ["start", "success", "error"], "default": "start"},
+                    "id": {"type": "string", "description": "Stable id to update an existing chip"},
+                },
+                "required": ["session_id", "name"],
+            },
+        ),
+        types.Tool(
+            name="avatar.ask",
+            description=(
+                "Ask the user a clarifying or approval question through the avatar and "
+                "wait for their answer. Returns {answer} (null on timeout). Use "
+                "kind='approve' for yes/no confirmations (e.g. before risky actions)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "question": {"type": "string"},
+                    "kind": {"type": "string", "enum": ["clarify", "approve"], "default": "clarify"},
+                    "options": {"type": "array", "items": {"type": "string"}},
+                    "timeout_seconds": {"type": "number", "default": 120},
+                },
+                "required": ["session_id", "question"],
+            },
+        ),
+        types.Tool(
+            name="avatar.set_status",
+            description="Show a transient progress/heartbeat line under the avatar (keeps it alive during long work).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "text": {"type": "string"},
+                    "progress": {"type": "number", "description": "0..1 optional progress"},
+                },
+                "required": ["session_id"],
+            },
+        ),
+        types.Tool(
+            name="avatar.set_voice",
+            description="Change the avatar's voice (signals the client to reconnect with the new voice).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string"},
+                    "voice_id": {"type": "string"},
+                },
+                "required": ["session_id", "voice_id"],
+            },
+        ),
     ]
 
 
@@ -206,5 +270,54 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                 "avatar": new_avatar.model_dump(),
             }))
         return ok({"changed": True, "avatar": new_avatar.model_dump()})
+
+    # ── Presence Protocol surface ──────────────────────────────────────────────
+    from backend.mcp_server import presence
+
+    ws = deps.get("websockets", {}).get(session_id)
+
+    if name == "avatar.show_action":
+        if ws is None:
+            return ok({"shown": False, "reason": "no client connected"})
+        await presence.send_event(ws, presence.action_event(
+            name=arguments["name"],
+            detail=arguments.get("detail"),
+            status=arguments.get("status", "start"),
+            id=arguments.get("id"),
+        ))
+        return ok({"shown": True})
+
+    if name == "avatar.set_status":
+        if ws is None:
+            return ok({"ok": False, "reason": "no client connected"})
+        await presence.send_event(ws, presence.status_event(
+            text=arguments.get("text"),
+            progress=arguments.get("progress"),
+        ))
+        return ok({"ok": True})
+
+    if name == "avatar.set_voice":
+        if ws is None:
+            return ok({"ok": False, "reason": "no client connected"})
+        await presence.send_event(ws, presence.voice_changed_event(
+            arguments["voice_id"], reconnect_required=True,
+        ))
+        return ok({"ok": True})
+
+    if name == "avatar.ask":
+        if ws is None:
+            return ok({"answered": False, "reason": "no client connected"})
+        ask_id = str(uuid.uuid4())[:8]
+        registry = deps.get("ask_registry")
+        await presence.send_event(ws, presence.ask_event(
+            id=ask_id,
+            question=arguments["question"],
+            kind=arguments.get("kind", "clarify"),
+            options=arguments.get("options"),
+        ))
+        answer = None
+        if registry is not None:
+            answer = await registry.wait(ask_id, arguments.get("timeout_seconds", 120))
+        return ok({"ask_id": ask_id, "answer": answer})
 
     return ok({"error": f"Unknown tool: {name}"})

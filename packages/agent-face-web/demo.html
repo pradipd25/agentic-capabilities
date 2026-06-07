@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>&lt;agent-face&gt; demo</title>
+    <style>
+      body { margin: 0; background: #060810; display: grid; place-items: center; height: 100vh; }
+      agent-face { width: 420px; height: 70vh; }
+    </style>
+  </head>
+  <body>
+    <!-- Point at a running reference backend (./start.sh). -->
+    <agent-face url="ws://localhost:8100/ws" voice="nova" controls></agent-face>
+
+    <!-- Dev: load the TS source directly via a bundler, or build to JS first.
+         e.g. `npx esbuild src/agent-face.ts --bundle --format=esm --outfile=agent-face.js`
+         then: <script type="module" src="./agent-face.js"></script> -->
+    <script type="module" src="./src/agent-face.ts"></script>
+  </body>
+</html>

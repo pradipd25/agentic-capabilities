@@ -15,15 +15,25 @@ class TextInputProcessor(FrameProcessor):
     """
     Handles incoming JSON WebSocket messages:
 
-    - ``text_input``  → adds user text to LLMContext and triggers LLM
+    - ``text_input`` / ``user_turn``  → adds user text to LLMContext and triggers LLM
     - ``set_avatar``  → looks up new avatar, sends avatar_changed event back
+    - ``set_voice``   → acks voice change (client reconnects)
+    - ``ask_response``→ resolves a pending ``avatar.ask`` (MCP surface)
     """
 
-    def __init__(self, context: LLMContext, websocket: WebSocket, avatar_registry, **kwargs):
+    def __init__(
+        self,
+        context: LLMContext,
+        websocket: WebSocket,
+        avatar_registry,
+        ask_registry=None,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self._context = context
         self._ws = websocket
         self._avatar_registry = avatar_registry
+        self._ask_registry = ask_registry
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -33,7 +43,8 @@ class TextInputProcessor(FrameProcessor):
                 msg = json.loads(frame.message)
                 msg_type = msg.get("type")
 
-                if msg_type == "text_input":
+                # ``user_turn`` is the Presence Protocol name for ``text_input``.
+                if msg_type in ("text_input", "user_turn"):
                     text = msg.get("text", "").strip()
                     if text:
                         # Barge-in handling for a text follow-up that arrives while
@@ -72,6 +83,20 @@ class TextInputProcessor(FrameProcessor):
                             }))
                         except Exception:
                             pass
+                    return  # consumed
+
+                if msg_type == "ask_response":
+                    # Resolve a pending avatar.ask so the MCP tool call returns.
+                    if self._ask_registry is not None:
+                        ask_id = msg.get("id", "")
+                        value = msg.get("value", "")
+                        if ask_id:
+                            self._ask_registry.resolve(ask_id, value)
+                    return  # consumed
+
+                if msg_type == "interrupt":
+                    # Barge-in / cancel from the client (Presence Protocol control).
+                    await self.push_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
                     return  # consumed
 
                 if msg_type == "set_voice":

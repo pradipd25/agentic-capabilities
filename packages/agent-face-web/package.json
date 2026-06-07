@@ -1,0 +1,13 @@
+{
+  "name": "@agent-face/web",
+  "version": "0.1.0",
+  "description": "Embeddable <agent-face> web component for the Agent Face framework",
+  "type": "module",
+  "main": "src/agent-face.ts",
+  "types": "src/agent-face.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "esbuild src/agent-face.ts --bundle --format=esm --outfile=dist/agent-face.js"
+  },
+  "license": "SEE LICENSE IN ../../README.md"
+}

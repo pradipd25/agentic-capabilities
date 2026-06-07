@@ -1,6 +1,47 @@
-# Agentic Capabilities — Avatar Conversation Framework
+# Agentic Capabilities — Agent Face Framework
 
-A plug-and-play video/avatar conversation capability for AI agents. Built on [Pipecat](https://github.com/pipecat-ai/pipecat), exposing avatar conversations as MCP tools so any compatible agent can acquire a face and a voice with a single config line.
+**Give any agent a face.** A reusable presence layer — a 3D avatar with voice,
+barge-in, and real-time animation — that any **agentic IDE**, **agentic
+application**, or **LLM application** can drive. Built on
+[Pipecat](https://github.com/pipecat-ai/pipecat); the app in this repo is the
+**reference implementation** of the framework.
+
+The piece that makes it *any-agent* is a transport-agnostic **Presence Protocol**
+that decouples *where the agent runs* (an **adapter**) from *the face that
+represents it* (the **renderer**):
+
+```
+ agent source ──adapter──▶ [ Presence Protocol ] ──▶ renderer (the face)
+   Claude Agent SDK            speak / think            3D avatar + voice
+   MCP agent / IDE             action / ask             TTS + STT + barge-in
+   OpenAI / raw stream         status / done            chat + action chips
+```
+
+The protocol is **bidirectional**: downstream `PresenceEvent`s (agent → face) and
+upstream `ControlMessage`s (face → agent: user turn, interrupt, ask-response).
+
+> **Build status:** Presence Protocol, renderer integration, the Claude Agent SDK
+> adapter (core), and the MCP server surface are implemented and unit-tested
+> (40 tests). See [`FEATURES.md`](./FEATURES.md) for the per-phase tracker; what's
+> next is the embeddable `<agent-face>` web component and headless Python/TS SDKs.
+
+---
+
+## Framework Architecture
+
+| Layer | What it is | Where |
+|---|---|---|
+| **Presence Protocol** | Versioned event schema (TS + Python) + conformance suite — the contract | `packages/presence-protocol/` |
+| **Adapters (in)** | Translate an agent source into the protocol. `Adapter` SPI + `ClaudeAgentAdapter` (embeds Claude Code's loop) | `packages/adapters/python/` |
+| **MCP surface (push)** | Lets any MCP agent/IDE drive the face: `avatar.show_action` / `ask` / `set_status` / `set_voice` | `backend/mcp_server/` |
+| **Renderer (out)** | The 3D avatar + voice runtime that consumes the protocol | `frontend/src/` |
+
+Two integration directions, both supported:
+
+- **Embed** — the framework runs the agent loop (e.g. the Claude Agent SDK adapter)
+  and streams its output to the face.
+- **Push** — an external agent/IDE (Claude Code, Cursor, …) connects over MCP and
+  drives the face with zero code.
 
 ---
 
@@ -107,6 +148,70 @@ cd frontend && npm install && npm run dev
 
 ---
 
+## Repository Layout
+
+```
+packages/
+  presence-protocol/        # the contract: versioned schema + TS & Python types + tests
+    typescript/index.ts
+    python/presence_protocol/
+  adapters/python/          # agent_face_adapters: Adapter SPI + ClaudeAgentAdapter
+backend/                    # FastAPI + Pipecat reference server
+  mcp_server/               # MCP surface incl. presence bridge (show_action/ask/...)
+  processors/               # pipeline processors (avatar_state, text_input, ...)
+frontend/                   # React + Three.js renderer (the face)
+```
+
+## Agent Backend — embed Claude Code (Phase 2b)
+
+By default the reference app answers with a single LLM completion. Set
+`AGENT_BACKEND=claude_code` to instead **embed Claude Code's agent loop** via the
+Claude Agent SDK — the avatar becomes a voice/3D front-end for an agent that reads
+files, edits code, and runs commands, narrating its work as action chips:
+
+```bash
+pip install -e ".[agent]"        # installs claude-agent-sdk (pulls a native binary)
+export ANTHROPIC_API_KEY=sk-...
+
+# in .env:
+AGENT_BACKEND=claude_code
+# AGENT_ALLOWED_TOOLS=             # empty = read-only (Read,Glob,Grep,WebSearch,WebFetch)
+# AGENT_ALLOWED_TOOLS=Read,Edit,Bash   # opt in to edits / shell
+# AGENT_ALLOWED_TOOLS=*            # no restriction (full default toolset)
+# AGENT_PERMISSION_MODE=default
+```
+
+**Tool policy (enforced).** With the read-only default the side-effecting tools
+(`Bash`, `Edit`, `Write`, `NotebookEdit`) are **blocked** via the SDK's
+`disallowed_tools` — verified: a blocked `Edit` leaves the file untouched even if
+the model spawns a subagent to retry. The agent can still *read* files (including
+`.git`), which is what read-only means. List tools in `AGENT_ALLOWED_TOOLS` to opt
+each one back in, or `*` to lift the restriction entirely. (Note: the SDK's
+`can_use_tool` callback is *not* consulted in this non-interactive streaming mode,
+and `allowed_tools` only auto-approves — it does not restrict — so `disallowed_tools`
+is the gate that actually enforces this.)
+
+STT (voice in) and TTS (voice out) are unchanged; conversational text is spoken,
+while tool steps appear as `action` chips (never spoken). When you opt into edits,
+the agent edits files in the backend's working directory — run it locally pointed
+at your repo.
+
+## Framework Tests
+
+The protocol, adapters, MCP bridge, and agent routing are unit-tested with no API
+key or native SDK required:
+
+```bash
+# Python: protocol conformance + Claude mapper + MCP bridge + Python SDK + agent routing
+PYTHONPATH="packages/presence-protocol/python:packages/adapters/python:packages/sdk-py:." \
+  python3 -m pytest packages backend/mcp_server/tests backend/processors/tests -q
+
+# Frontend: typecheck + build
+cd frontend && npx tsc --noEmit && npx vite build
+```
+
+---
+
 ## LLM Configuration
 
 Set `LLM_PROVIDER` in `.env`:
@@ -155,12 +260,23 @@ Available tools:
 |---|---|
 | `avatar.create_session` | Create a session, returns a `join_url` for the user |
 | `avatar.speak` | Make the avatar say something via TTS |
+| `avatar.show_action` | Show a tool/step as an action chip (shown, never spoken) — e.g. `Read app.py` |
+| `avatar.ask` | Ask the user a clarify/approve question **and wait** for their answer |
+| `avatar.set_status` | Show a transient progress/heartbeat line (keeps the avatar alive during long work) |
+| `avatar.set_voice` | Change the avatar's voice |
+| `avatar.set_animation` | Trigger a named animation (idle/talking/thinking/greeting) |
 | `avatar.get_transcript` | Read the full conversation history |
 | `avatar.set_avatar` | Swap the 3D character |
 | `avatar.inject_context` | Add context to the LLM system prompt |
 | `avatar.list_avatars` | List available characters |
 | `avatar.list_sessions` | List active sessions |
 | `avatar.close_session` | End a session |
+
+The `show_action` / `ask` / `set_status` tools map to Presence Protocol events the
+renderer already understands — so an agent like Claude Code can narrate its work
+(action chips) and request approvals through the avatar. See
+[`packages/presence-protocol/README.md`](./packages/presence-protocol/README.md)
+for the full event schema.
 
 ---
 
@@ -197,6 +313,11 @@ Available tools:
 # LLM
 LLM_PROVIDER=openai            # claude | openai | gemini | groq | ollama
 LLM_MODEL=                     # optional model override
+
+# Agent backend
+AGENT_BACKEND=pipeline         # pipeline (single LLM) | claude_code (Claude Agent SDK)
+AGENT_ALLOWED_TOOLS=           # empty = read-only; e.g. Read,Edit,Bash to enable changes
+AGENT_PERMISSION_MODE=default
 
 # API Keys
 ANTHROPIC_API_KEY=

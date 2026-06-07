@@ -13,6 +13,7 @@ from backend.avatar.registry import AvatarRegistry
 from backend.config import settings
 from backend.llm.factory import create_llm_service
 from backend.mcp_server.tools import mcp_server
+from backend.mcp_server.presence import AskRegistry
 from backend.processors.avatar_state import AvatarStateProcessor
 from backend.processors.context_sanitizer import ContextSanitizerProcessor
 from backend.processors.text_input import TextInputProcessor
@@ -29,6 +30,7 @@ _avatar_registry = AvatarRegistry(_PROJECT_ROOT / "avatars" / "manifest.json")
 _websockets: dict[str, WebSocket] = {}
 _contexts: dict = {}
 _voice_preview_cache: dict[str, bytes] = {}
+_ask_registry = AskRegistry()
 
 
 @asynccontextmanager
@@ -40,6 +42,7 @@ async def lifespan(app: FastAPI):
         "contexts": _contexts,
         "config": settings,
         "host": settings.host if settings.host != "0.0.0.0" else "localhost",
+        "ask_registry": _ask_registry,
     }
     log.info("server.started", provider=settings.llm_provider, port=settings.port)
     yield
@@ -172,8 +175,6 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             ),
         )
 
-        llm = create_llm_service(settings)
-
         context = LLMContext()
         # Always prepend the language-mirroring instruction so it can't be overridden
         # by a custom SYSTEM_PROMPT, then append the persona prompt.
@@ -184,9 +185,9 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         _contexts[session_id] = context
 
         user_aggregator = LLMUserAggregator(context)
-        assistant_aggregator = LLMAssistantAggregator(context)
-        text_input_processor = TextInputProcessor(context, websocket, _avatar_registry)
-        context_sanitizer = ContextSanitizerProcessor(context)
+        text_input_processor = TextInputProcessor(
+            context, websocket, _avatar_registry, ask_registry=_ask_registry
+        )
 
         tts = OpenAITTSService(
             api_key=settings.openai_api_key,
@@ -207,19 +208,46 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         avatar_processor = AvatarStateProcessor(session_id, websocket)
         vad_processor = VADProcessor(vad_analyzer=SileroVADAnalyzer())
 
-        pipeline = Pipeline([
-            transport.input(),
-            text_input_processor,
-            vad_processor,
-            stt,
-            user_aggregator,
-            context_sanitizer,
-            llm,
-            avatar_processor,
-            tts,
-            assistant_aggregator,
-            transport.output(),
-        ])
+        if settings.agent_backend == "claude_code":
+            # Embed Claude Code's agent loop. The Agent SDK owns conversation state,
+            # so the context aggregator/sanitizer + LLM service are not on this path;
+            # STT in and TTS out are unchanged.
+            from backend.processors.claude_agent import (
+                ClaudeAgentProcessor,
+                build_claude_adapter,
+            )
+
+            claude_agent_processor = ClaudeAgentProcessor(
+                build_claude_adapter(settings), websocket
+            )
+            pipeline = Pipeline([
+                transport.input(),
+                text_input_processor,
+                vad_processor,
+                stt,
+                user_aggregator,
+                claude_agent_processor,
+                avatar_processor,
+                tts,
+                transport.output(),
+            ])
+        else:
+            llm = create_llm_service(settings)
+            assistant_aggregator = LLMAssistantAggregator(context)
+            context_sanitizer = ContextSanitizerProcessor(context)
+            pipeline = Pipeline([
+                transport.input(),
+                text_input_processor,
+                vad_processor,
+                stt,
+                user_aggregator,
+                context_sanitizer,
+                llm,
+                avatar_processor,
+                tts,
+                assistant_aggregator,
+                transport.output(),
+            ])
 
         task = PipelineTask(
             pipeline,

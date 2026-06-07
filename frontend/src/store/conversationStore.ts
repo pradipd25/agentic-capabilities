@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AnimationName, AvatarMeta, TranscriptEntry } from '../types/protocol'
+import type { AgentAction, AnimationName, AskPrompt, AvatarMeta, TranscriptEntry } from '../types/protocol'
 
 interface ConversationState {
   sessionId: string | null
@@ -11,6 +11,9 @@ interface ConversationState {
   audioLevel: number
   transcript: TranscriptEntry[]
   currentToken: string
+  actions: AgentAction[]
+  pendingAsk: AskPrompt | null
+  statusText: string
   isConnected: boolean
   voiceId: string
 
@@ -21,6 +24,11 @@ interface ConversationState {
   addTranscriptEntry: (entry: TranscriptEntry) => void
   appendToken: (token: string) => void
   finalizeToken: () => void
+  upsertAction: (action: AgentAction) => void
+  setAsk: (ask: AskPrompt) => void
+  clearAsk: () => void
+  setStatus: (text: string) => void
+  clearTurn: () => void
   setConnected: (v: boolean) => void
   setVoiceId: (id: string) => void
 }
@@ -35,6 +43,9 @@ export const useConversationStore = create<ConversationState>((set) => ({
   audioLevel: 0,
   transcript: [],
   currentToken: '',
+  actions: [],
+  pendingAsk: null,
+  statusText: '',
   isConnected: false,
   voiceId: 'nova',
 
@@ -49,12 +60,37 @@ export const useConversationStore = create<ConversationState>((set) => ({
   setAudioLevel: (level) => set({ audioLevel: level }),
 
   addTranscriptEntry: (entry) =>
-    set((s) => ({ transcript: [...s.transcript, entry], currentToken: '' })),
+    set((s) => ({
+      transcript: [...s.transcript, entry],
+      currentToken: '',
+      // a new user turn resets the previous turn's activity
+      ...(entry.speaker === 'user' ? { actions: [], pendingAsk: null, statusText: '' } : {}),
+    })),
 
   appendToken: (token) =>
     set((s) => ({ currentToken: s.currentToken + token })),
 
-  finalizeToken: () => set({ currentToken: '' }),
+  finalizeToken: () => set({ currentToken: '', statusText: '' }),
+
+  // add a new action, or update the status of an existing one (matched by id)
+  upsertAction: (action) =>
+    set((s) => {
+      const i = action.id ? s.actions.findIndex((a) => a.id === action.id) : -1
+      if (i >= 0) {
+        const next = s.actions.slice()
+        next[i] = { ...next[i], ...action }
+        return { actions: next }
+      }
+      return { actions: [...s.actions, action] }
+    }),
+
+  setAsk: (ask) => set({ pendingAsk: ask }),
+
+  clearAsk: () => set({ pendingAsk: null }),
+
+  setStatus: (text) => set({ statusText: text }),
+
+  clearTurn: () => set({ actions: [], pendingAsk: null, statusText: '' }),
 
   setConnected: (v) => set({ isConnected: v }),
 
